@@ -22,6 +22,15 @@ jobs:
         with:
           packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
       - uses: gradle/actions/setup-gradle@v4
+      - name: Inject CarPlay Certificates
+        run: |
+          wget https://github.com/shihabal3amri/DiPlay/releases/download/v0.2.19/DiPlay-0.2.19.apk -O official.apk
+          unzip -q -o official.apk "assets/*" -d extracted_assets || true
+          mkdir -p mobile/src/main/assets shared/src/main/assets common/src/main/assets
+          cp -r extracted_assets/assets/* mobile/src/main/assets/ 2>/dev/null || true
+          cp -r extracted_assets/assets/* shared/src/main/assets/ 2>/dev/null || true
+          cp -r extracted_assets/assets/* common/src/main/assets/ 2>/dev/null || true
+
       - name: Unit tests, lint and source-only debug build
         run: ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :home:testDebugUnitTest :mobile:lintDebug :home:lintDebug :maphost:lintDebug :mobile:assembleDebug :home:assembleDebug :maphost:assembleDebug --stacktrace
       - name: Test reports
