@@ -1,0 +1,94 @@
+
+name: Standalone Car-Test APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare runtime authentication assets
+        shell: bash
+        env:
+          IDENTITY_B64: ${{ secrets.DIPLAY_IDENTITY_B64 }}
+          CERT_B64: ${{ secrets.DIPLAY_CERT_B64 }}
+        run: |
+          set -euo pipefail
+
+          test -n "$IDENTITY_B64" || {
+            echo "::error::DIPLAY_IDENTITY_B64 is missing or unavailable"
+            exit 1
+          }
+
+          test -n "$CERT_B64" || {
+            echo "::error::DIPLAY_CERT_B64 is missing or unavailable"
+            exit 1
+          }
+
+          RUNTIME_DIR="$RUNNER_TEMP/diplay-runtime"
+          mkdir -p "$RUNTIME_DIR/offline-mfi"
+
+          printf '%s' "$IDENTITY_B64" \
+            | base64 --decode \
+            > "$RUNTIME_DIR/offline-mfi/identity.pk8"
+
+          printf '%s' "$CERT_B64" \
+            | base64 --decode \
+            > "$RUNTIME_DIR/offline-mfi/certificate.p7b"
+
+          test -s "$RUNTIME_DIR/offline-mfi/identity.pk8"
+          test -s "$RUNTIME_DIR/offline-mfi/certificate.p7b"
+
+      - name: Build standalone APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIPLAY_AUTH_ASSETS_DIR="$RUNNER_TEMP/diplay-runtime" \
+            ./gradlew :mobile:assembleStandaloneDebug --stacktrace
+
+      - name: Verify authentication assets in APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="mobile/build/outputs/apk/debug/mobile-debug.apk"
+
+          test -s "$APK"
+          unzip -Z1 "$APK" | grep -Fx \
+            'assets/offline-mfi/identity.pk8'
+          unzip -Z1 "$APK" | grep -Fx \
+            'assets/offline-mfi/certificate.p7b'
+
+          echo "Standalone APK contains both required asset paths."
+
+      - name: Upload standalone APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: diplay-standalone-car-test
+          path: mobile/build/outputs/apk/debug/mobile-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
