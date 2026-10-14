@@ -93,7 +93,9 @@ val rejectBundledCredentials by tasks.registering {
     doLast {
         check(allowed.all { it.isFile }) { "Explicit local authentication assets are incomplete" }
         val unexpected = filesToCheck.files.filter { it.canonicalFile !in allowed }
-        check(unexpected.isEmpty()) { "Unexpected credential files in APK assets" }
+        check(unexpected.isEmpty()) {
+            "Unexpected credential files in APK assets: " + unexpected.joinToString { it.path }
+        }
     }
 }
 tasks.named("preBuild") { dependsOn(rejectBundledCredentials) }
