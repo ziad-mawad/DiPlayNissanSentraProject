@@ -1366,6 +1366,13 @@ private class VideoDecoder(
                 }
             }
         }
+        if (mime == MediaFormat.MIMETYPE_VIDEO_AVC) {
+            try {
+                return MediaCodec.createByCodecName("OMX.google.h264.decoder")
+            } catch (error: Exception) {
+                Log.w(TAG, "Google software decoder unavailable", error)
+            }
+        }
         return MediaCodec.createDecoderByType(mime)
     }
 
