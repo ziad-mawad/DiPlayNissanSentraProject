@@ -771,6 +771,13 @@ internal class ParkingOutput(width: Int, height: Int) {
 internal fun videoOperatingRate(type: Int, statsLabel: String?, frameRate: Int): Int =
     if (type == MAIN_SCREEN_TYPE && statsLabel == null && frameRate > 0) frameRate else 0
 
+/**
+ * Local patch for RK3368 / MTCE head units whose hardware H.264 decoder configures without error but
+ * never shows a picture (grey or black CarPlay screen). While true, the AOSP software decoder is tried
+ * first for H.264 and the normal hardware attempts remain as fallbacks. Set to false to restore stock behaviour.
+ */
+private const val FORCE_SOFTWARE_H264 = true
+
 internal data class DecoderAttempt(
     val codecName: String?,
     val tuned: Boolean,
@@ -1163,12 +1170,18 @@ private class VideoDecoder(
             MtkDecoderTuning.legacyAcodecDecoderName(mime) != null) maximumMtkMode else MtkDecoderMode.NONE
         var configured: ConfiguredVideoDecoder? = null
         var used: DecoderAttempt? = null
-        for (attempt in videoDecoderAttempts(
+        val forcedSoftware = forcedSoftwareH264Decoder(mime)
+        val stockAttempts = videoDecoderAttempts(
             requestedRate,
             softwareDecoderName(mime),
             requestedLowLatency,
             requestedMtkMode,
-        )) {
+        )
+        val orderedAttempts = if (forcedSoftware != null) {
+            report("forcing software H.264 decoder $forcedSoftware before hardware attempts")
+            listOf(DecoderAttempt(codecName = forcedSoftware, tuned = false)) + stockAttempts
+        } else stockAttempts
+        for (attempt in orderedAttempts) {
             configured = tryConfigure(mime, csd, surface, attempt, atOnce)
             if (configured != null) { used = attempt; break }
         }
@@ -1342,6 +1355,22 @@ private class VideoDecoder(
     private fun listsPictureOrder(codec: MediaCodec): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             runCatching { PICTURE_ORDER_PARAMETER in codec.supportedVendorParameters }.getOrDefault(false)
+
+    /**
+     * AOSP's software H.264 decoder: OMX.google.h264.decoder on Android 9, c2.android.avc.decoder on 10+.
+     * MediaCodecInfo.isSoftwareOnly needs API 29, so match the AOSP name prefixes instead. Null when the
+     * patch is off, the stream is not H.264, or no such decoder is installed.
+     */
+    private fun forcedSoftwareH264Decoder(mime: String): String? {
+        if (!FORCE_SOFTWARE_H264 || mime != MediaFormat.MIMETYPE_VIDEO_AVC) return null
+        return runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
+                !it.isEncoder && mime in it.supportedTypes &&
+                    (it.name.startsWith("OMX.google.", ignoreCase = true) ||
+                        it.name.startsWith("c2.android.", ignoreCase = true))
+            }?.name
+        }.getOrNull()
+    }
 
     private fun softwareDecoderName(mime: String): String? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
